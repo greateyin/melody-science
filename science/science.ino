@@ -13,13 +13,13 @@
 // HX711 load cell
 #define HX_DT 6
 #define HX_SCK 7
+#define BTN_TARE 8
 float CAL_FACTOR = 903.2; // calibrated with 50g
 
 LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature tempSensors(&oneWire);
 HX711 scale;
-bool hxTared = false;
 
 void setup() {
   Serial.begin(9600);
@@ -46,17 +46,35 @@ void setup() {
 
   scale.begin(HX_DT, HX_SCK);
   scale.set_scale(CAL_FACTOR);
-  if (scale.is_ready()) {
-    scale.tare();
-    hxTared = true;
-    Serial.println("HX711 tare OK");
-  } else {
-    Serial.println("HX711 not ready, skip tare");
-  }
+  pinMode(BTN_TARE, INPUT_PULLUP);
+  Serial.println("HX711 ready check pending");
   Serial.println("HX711 begin");
 }
 
 void loop() {
+  static bool lastStable = HIGH;
+  static bool lastRead = HIGH;
+  static unsigned long lastChangeMs = 0;
+  const unsigned long debounceMs = 40;
+
+  bool btn = digitalRead(BTN_TARE);
+  if (btn != lastRead) {
+    lastChangeMs = millis();
+    lastRead = btn;
+  }
+
+  if ((millis() - lastChangeMs) > debounceMs && btn != lastStable) {
+    lastStable = btn;
+    if (lastStable == LOW) {
+      if (scale.is_ready()) {
+        scale.tare();
+        Serial.println("HX711 tare OK");
+      } else {
+        Serial.println("HX711 not ready, skip tare");
+      }
+    }
+  }
+
   tempSensors.requestTemperatures();
   float tempC = tempSensors.getTempCByIndex(0);
   bool tempValid = (tempC > -100.0 && tempC < 150.0);
@@ -64,10 +82,6 @@ void loop() {
   bool hxReady = scale.is_ready();
   float weight_g = 0.0;
   if (hxReady) {
-    if (!hxTared) {
-      scale.tare();
-      hxTared = true;
-    }
     weight_g = scale.get_units(10);
   }
 
