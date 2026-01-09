@@ -13,12 +13,13 @@
 // HX711 load cell
 #define HX_DT 6
 #define HX_SCK 7
-float CAL_FACTOR = -705.0; // adjust after calibration
+float CAL_FACTOR = 903.2; // calibrated with 50g
 
 LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS);
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature tempSensors(&oneWire);
 HX711 scale;
+bool hxTared = false;
 
 void setup() {
   Serial.begin(9600);
@@ -47,6 +48,7 @@ void setup() {
   scale.set_scale(CAL_FACTOR);
   if (scale.is_ready()) {
     scale.tare();
+    hxTared = true;
     Serial.println("HX711 tare OK");
   } else {
     Serial.println("HX711 not ready, skip tare");
@@ -60,10 +62,13 @@ void loop() {
   bool tempValid = (tempC > -100.0 && tempC < 150.0);
 
   bool hxReady = scale.is_ready();
-  float force_N = 0.0;
+  float weight_g = 0.0;
   if (hxReady) {
-    float force_g = scale.get_units(10);
-    force_N = force_g * 0.00981;
+    if (!hxTared) {
+      scale.tare();
+      hxTared = true;
+    }
+    weight_g = scale.get_units(10);
   }
 
   Serial.print("tempC=");
@@ -84,10 +89,10 @@ void loop() {
   }
 
   lcd.setCursor(0, 1);
-  lcd.print("F:");
+  lcd.print("W:");
   if (hxReady) {
-    lcd.print(force_N, 2);
-    lcd.print("N");
+    lcd.print(weight_g, 1);
+    lcd.print("g");
   } else {
     lcd.print("--.--");
   }
