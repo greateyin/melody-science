@@ -22,7 +22,7 @@
 
 // Heating (MOSFET control)
 #define HEAT_PWM 9
-float targetTemp = 60.0;
+float targetTemp = 20.0;
 float tempHys = 0.5;
 float CAL_FACTOR = 903.2; // calibrated with 50g
 
@@ -155,14 +155,34 @@ void loop() {
     if (targetTemp > 100.0) targetTemp = 100.0;
   }
 
-  // Heating control with hysteresis
-  if (tempValid && tempC < targetTemp - tempHys) {
-    analogWrite(HEAT_PWM, 180);
-  } else if (tempValid && tempC > targetTemp + tempHys) {
-    analogWrite(HEAT_PWM, 0);
-  } else if (!tempValid) {
-    analogWrite(HEAT_PWM, 0);
+  // Heating control with hysteresis + time-proportional control (<= 40%) + soft-start
+  static float duty = 0.0f;
+  static float dutyRamp = 0.0f;
+  const float dutyMax = 0.4f;
+  const unsigned long heatPeriodMs = 1000;
+
+  if (tempValid) {
+    if (tempC < targetTemp - 5.0f) {
+      duty = dutyMax;
+    } else if (tempC < targetTemp - tempHys) {
+      duty = 0.35f;
+    } else if (tempC > targetTemp + tempHys) {
+      duty = 0.0f;
+    }
+  } else {
+    duty = 0.0f;
   }
+
+  if (duty > dutyRamp) {
+    dutyRamp = min(duty, dutyRamp + 0.02f);
+  } else {
+    dutyRamp = duty;
+  }
+
+  if (dutyRamp > dutyMax) dutyRamp = dutyMax;
+  unsigned long phase = millis() % heatPeriodMs;
+  unsigned long onTime = (unsigned long)(heatPeriodMs * dutyRamp);
+  digitalWrite(HEAT_PWM, (phase < onTime) ? HIGH : LOW);
 
   bool hxReady = scale.is_ready();
   float weight_g = 0.0;
@@ -181,10 +201,13 @@ void loop() {
     snprintf(line1, sizeof(line1), "T:--.-C %3dC", (int)targetTemp);
   }
   if (hxReady) {
-    dtostrf(weight_g, 6, 1, weightBuf);
-    snprintf(line2, sizeof(line2), "W:%sg", weightBuf);
+    float force_N = weight_g * 0.00981f;
+    dtostrf(weight_g, 5, 1, weightBuf);
+    char forceBuf[8];
+    dtostrf(force_N, 4, 2, forceBuf);
+    snprintf(line2, sizeof(line2), "W:%sg F:%sN", weightBuf, forceBuf);
   } else {
-    snprintf(line2, sizeof(line2), "W:--.--g");
+    snprintf(line2, sizeof(line2), "W:--.-- F:--.--");
   }
   padLine(line1);
   padLine(line2);
